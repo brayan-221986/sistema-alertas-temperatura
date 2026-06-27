@@ -1,0 +1,25 @@
+name: sistema_alertas_app
+description: "App Flutter para el sistema de alertas de temperatura en tiempo real."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  mqtt_client: ^10.3.0
+  audioplayers: ^6.1.0
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/sounds/alerta.mp3
