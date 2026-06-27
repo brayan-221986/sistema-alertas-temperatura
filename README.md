@@ -203,11 +203,80 @@ mosquitto_sub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/al
 
 ---
 
-## Próximos Pasos (Módulo 3)
+## Módulo 3 — App Flutter (MQTT + Alerta Sonora)
 
-- Desarrollar app Flutter que se suscriba a `esp32/alertas/#`
-- Disparar alerta sonora cuando el estado sea `ALERTA`
-- Detección de outliers en lugar de umbral fijo
+### Estructura del Proyecto
+
+```
+flutter_app/
+├── pubspec.yaml
+├── assets/
+│   └── sounds/
+│       └── alerta.mp3          # Beep 880Hz x 0.5s generado con Python
+└── lib/
+    ├── main.dart                # Punto de entrada
+    ├── models/
+    │   └── sensor_data.dart     # Modelo SensorData (temperatura + estado + timestamp)
+    ├── services/
+    │   ├── mqtt_service.dart    # Cliente MQTT (mqtt_client)
+    │   └── alert_sound_service.dart  # Alerta sonora (audioplayers)
+    └── screens/
+        └── home_screen.dart     # UI principal: nube conexión, temperatura, estado
+```
+
+### Dependencias (`pubspec.yaml`)
+
+- `mqtt_client: ^10.3.0` — cliente MQTT con autenticación y reconexión automática
+- `audioplayers: ^6.1.0` — reproducción de audio en loop para la alerta
+
+### Funcionamiento
+
+1. Al iniciar, se registran los listeners de los streams **antes** de conectar (evita race condition que dejaba `_conectado = false`).
+2. Se conecta al broker Mosquitto en `3.14.80.113:1883` con usuario/contraseña.
+3. Se suscribe a `esp32/alertas/temperatura` y `esp32/alertas/estado`.
+4. Cada mensaje recibido se almacena; cuando ambos tópicos tienen datos, se emite un `SensorData` combinado.
+5. La UI muestra:
+   - Ícono de nube verde/rojo indicando estado de conexión
+   - Temperatura en °C con 2 decimales
+   - Etiqueta `NORMAL` (verde) o `ALERTA` (rojo)
+6. Si el estado es `ALERTA`, reproduce `alerta.mp3` en loop. Si vuelve a `NORMAL`, lo detiene.
+
+### Bugs Encontrados y Corregidos
+
+| Problema | Causa | Solución |
+|----------|-------|----------|
+| Nube roja aunque conectado | Race condition: listeners se registraban después de `conectar()` | Mover `.listen()` antes del `await _mqtt.conectar()` |
+| Error `use_of_void_result` | Cascade operators con setters en Dart 3.x con mqtt_client | Asignaciones línea por línea con `_cliente!` |
+| Posible null crash | `connectionStatus!` sin chequeo nulo | Usar `connectionStatus?.state` |
+| Sin conexión en Android 15 | Bloqueo de cleartext traffic | Agregar `android:usesCleartextTraffic="true"` en `AndroidManifest.xml` |
+| Celular no conectaba al broker | Security Group solo permitía IP de laptop | Cambiar Source a `0.0.0.0/0` |
+
+### Cómo Ejecutar
+
+```bash
+cd flutter_app
+flutter pub get
+flutter run
+```
+
+### Verificación (Módulo 3)
+
+Forzar alerta desde la terminal de tu laptop:
+
+```bash
+mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 \
+  -t "esp32/alertas/estado" -m "ALERTA"
+```
+
+La app debe mostrar la etiqueta en rojo y reproducir el pitido en loop. Publicar `NORMAL` detiene el sonido.
+
+---
+
+## Próximos Pasos
+
+- Detección de outliers en el ESP32 en lugar del umbral fijo de 30°C
+- Autenticación TLS entre ESP32/Flutter y Mosquitto (puerto 8883)
+- Soporte de notificaciones en segundo plano con `just_audio` + `audio_service`
 
 ---
 
@@ -215,10 +284,12 @@ mosquitto_sub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/al
 
 | Acción | Comando |
 |--------|---------|
-| Flashear ESP32 | `pio run -t upload` |
-| Monitor serie | `pio device monitor` |
-| Compilar sin flashear | `pio run` |
-| Ver logs de Mosquitto | `sudo journalctl -u mosquitto -f` |
-| Estado del broker | `sudo systemctl status mosquitto` |
+| ESP32 — Flashear | `pio run -t upload` |
+| ESP32 — Monitor serie | `pio device monitor` |
+| Flutter — Ejecutar | `cd flutter_app && flutter run` |
+| Flutter — Obtener dependencias | `cd flutter_app && flutter pub get` |
+| Mosquitto — Logs | `sudo journalctl -u mosquitto -f` |
+| Mosquitto — Estado | `sudo systemctl status mosquitto` |
 | Suscribirse a tópicos | `mosquitto_sub -h <IP> -p 1883 -u <user> -P <pass> -t "<topic>" -v` |
 | Publicar un mensaje | `mosquitto_pub -h <IP> -p 1883 -u <user> -P <pass> -t "<topic>" -m "<msg>"` |
+| Forzar alerta de prueba | `mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/alertas/estado" -m "ALERTA"` |
