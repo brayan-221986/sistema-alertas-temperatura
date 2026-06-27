@@ -6,15 +6,9 @@ Sistema IoT que lee temperatura con un sensor DS18B20 en un ESP32, la publica v�
 
 ## Arquitectura General
 
-```
-[ESP32 + DS18B20 + LED] <---MQTT---> [Mosquitto en AWS EC2] ---MQTT---> [App Flutter]
-       publica:                             broker                      suscribe:
-  esp32/alertas/temperatura                                         esp32/alertas/temperatura
-  esp32/alertas/estado                                              esp32/alertas/estado
-  esp32/alertas/mensaje                                             esp32/alertas/mensaje
-       recibe:
-  esp32/alertas/config  <--- desde Flutter (umbrales configurables)
-```
+<p align="center">
+  <img src="docs/diagrama.png" alt="Diagrama de arquitectura del sistema" width="700">
+</p>
 
 ---
 
@@ -29,6 +23,10 @@ Sistema IoT que lee temperatura con un sensor DS18B20 en un ESP32, la publica v�
 - Resistencia 4.7kΩ (pull-up del DS18B20, solo si el breakout no la trae soldada)
 
 ### Conexión Eléctrica
+
+<p align="center">
+  <img src="docs/circuito.jpg" alt="Circuito ESP32 con DS18B20 y LED rojo" width="600">
+</p>
 
 ```
 DS18B20:
@@ -261,6 +259,11 @@ flutter_app/
    - Botón **Guardar configuración** que persiste localmente y envía JSON al ESP32
 6. Si el estado es alerta: reproduce `alerta.mp3` en loop y muestra notificación persistente (no se descarta automáticamente al volver a normal).
 7. Si vuelve a `NORMAL`: detiene el sonido, pero la notificación queda visible hasta que el usuario la descarte.
+
+<p align="center">
+  <img src="docs/app-normal.jpg" alt="App Flutter - estado normal" width="300">
+  <img src="docs/app-alerta.jpg" alt="App Flutter - estado alerta" width="300">
+</p>
 
 ### Bugs Encontrados y Corregidos
 
