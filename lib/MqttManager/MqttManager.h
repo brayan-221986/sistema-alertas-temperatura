@@ -2,6 +2,9 @@
 #define MQTT_MANAGER_H
 
 #include <Arduino.h>
+#include <PubSubClient.h>
+
+typedef void (*MqttCallback)(char* topico, byte* payload, unsigned int longitud);
 
 class MqttManager {
 public:
@@ -11,6 +14,8 @@ public:
     void iniciar();
     bool asegurarConexion();
     void publicar(const char* topico, const char* valor);
+    void suscribir(const char* topico);
+    void setCallback(MqttCallback callback);
 
 private:
     const char* _host;

@@ -1,16 +1,19 @@
 # Sistema de Alertas de Temperatura en Tiempo Real
 
-Sistema IoT que lee temperatura con un sensor DS18B20 en un ESP32, la publica vía MQTT a un broker Mosquitto en AWS EC2, activa un LED rojo como alerta local cuando se supera un umbral, y notifica una app Flutter en tiempo real.
+Sistema IoT que lee temperatura con un sensor DS18B20 en un ESP32, la publica vía MQTT a un broker Mosquitto en AWS EC2, activa un LED rojo como alerta local cuando la temperatura sale de un rango configurable, y notifica una app Flutter en tiempo real con sonido y notificaciones persistentes.
 
 ---
 
 ## Arquitectura General
 
 ```
-[ESP32 + DS18B20 + LED] ---MQTT---> [Mosquitto en AWS EC2] ---MQTT---> [App Flutter]
-       publica:                              |                         suscribe:
-  esp32/alertas/temperatura               broker                   esp32/alertas/temperatura
-  esp32/alertas/estado                                                esp32/alertas/estado
+[ESP32 + DS18B20 + LED] <---MQTT---> [Mosquitto en AWS EC2] ---MQTT---> [App Flutter]
+       publica:                             broker                      suscribe:
+  esp32/alertas/temperatura                                         esp32/alertas/temperatura
+  esp32/alertas/estado                                              esp32/alertas/estado
+  esp32/alertas/mensaje                                             esp32/alertas/mensaje
+       recibe:
+  esp32/alertas/config  <--- desde Flutter (umbrales configurables)
 ```
 
 ---
@@ -60,7 +63,7 @@ sistema-alertas-temp/
 │   ├── WifiManager/             # Conexión WiFi
 │   │   ├── WifiManager.h
 │   │   └── WifiManager.cpp
-│   └── MqttManager/             # Cliente MQTT (PubSubClient)
+│   └── MqttManager/             # Cliente MQTT (PubSubClient) con callback
 │       ├── MqttManager.h
 │       └── MqttManager.cpp
 └── src/
@@ -72,6 +75,7 @@ sistema-alertas-temp/
 - `paulstoffregen/OneWire @ ^2.3.7` — protocolo 1-Wire
 - `milesburton/DallasTemperature @ ^3.11.0` — driver para sensores Dallas (DS18B20)
 - `knolleary/PubSubClient @ ^2.8` — cliente MQTT ligero para ESP32
+- `bblanchon/ArduinoJson @ ^7.0.0` — parseo de configuración JSON vía MQTT
 
 ### Gestión de Credenciales (`.env`)
 
@@ -88,12 +92,18 @@ MQTT_PASSWORD=alertas123
 
 Al compilar, `scripts/load_env.py` lee `.env` y genera `include/secrets.h` automáticamente. Ambos archivos están excluidos de git (`.gitignore`).
 
-### Funcionamiento (Módulo 1)
+### Funcionamiento (Módulo 4 - configurable)
 
-1. En `setup()` se inicializan el LED (apagado) y el sensor DS18B20.
-2. Cada 2 segundos se lee la temperatura del sensor.
-3. Si la temperatura supera los 30.0°C (umbral temporal), se enciende el LED rojo.
-4. Todo se muestra por el monitor serie a 115200 baudios.
+1. En `setup()` se cargan umbrales y mensajes desde NVS (`Preferences.h`).
+2. Se conecta a WiFi y al broker MQTT.
+3. Se suscribe a `esp32/alertas/config` para recibir configuración desde Flutter.
+4. Cada 2 segundos lee el DS18B20 y compara contra `[umbralMin, umbralMax]`:
+   - `temp < min` → `ALERTA_MIN`, LED encendido, publica mensaje de "baja"
+   - `temp > max` → `ALERTA_MAX`, LED encendido, publica mensaje de "alta"
+   - Dentro del rango → `NORMAL`, LED apagado
+5. Publica en tres tópicos: `temperatura` (float), `estado` (ALERTA_MIN/ALERTA_MAX/NORMAL), `mensaje` (texto con `{temp}` interpolado).
+6. Al recibir un JSON en `esp32/alertas/config`, guarda los nuevos valores en NVS y los aplica inmediatamente.
+7. Los umbrales y mensajes persisten ante reinicios del ESP32.
 
 ---
 
@@ -142,13 +152,15 @@ sudo systemctl enable mosquitto
 
 | Tipo | Puerto | Fuente | Descripción |
 |------|--------|--------|-------------|
-| Custom TCP | 1883 | IP del hogar | MQTT desde ESP32 |
+| Custom TCP | 1883 | `0.0.0.0/0` | MQTT desde ESP32 y Flutter |
 
 ### Tópicos MQTT Definidos
 
 ```
 esp32/alertas/temperatura   → valor numérico de temperatura en °C
-esp32/alertas/estado        → "NORMAL" o "ALERTA"
+esp32/alertas/estado        → "NORMAL", "ALERTA_MIN" o "ALERTA_MAX"
+esp32/alertas/mensaje       → texto descriptivo con {temp} interpolado
+esp32/alertas/config        → JSON de configuración (recibido por ESP32)
 ```
 
 ### Complicación y Solución
@@ -203,7 +215,7 @@ mosquitto_sub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/al
 
 ---
 
-## Módulo 3 — App Flutter (MQTT + Alerta Sonora)
+## Módulo 3 — App Flutter (MQTT + Alerta Sonora + Notificaciones + Config)
 
 ### Estructura del Proyecto
 
@@ -212,34 +224,43 @@ flutter_app/
 ├── pubspec.yaml
 ├── assets/
 │   └── sounds/
-│       └── alerta.mp3          # Beep 880Hz x 0.5s generado con Python
+│       └── alerta.mp3            # Beep 880Hz x 0.5s generado con Python
 └── lib/
-    ├── main.dart                # Punto de entrada
+    ├── main.dart                  # Punto de entrada
     ├── models/
-    │   └── sensor_data.dart     # Modelo SensorData (temperatura + estado + timestamp)
+    │   └── sensor_data.dart       # Modelo SensorData (temperatura + estado + mensaje + timestamp)
     ├── services/
-    │   ├── mqtt_service.dart    # Cliente MQTT (mqtt_client)
-    │   └── alert_sound_service.dart  # Alerta sonora (audioplayers)
+    │   ├── mqtt_service.dart      # Cliente MQTT con publicación y suscripción a 3 tópicos
+    │   ├── alert_sound_service.dart  # Alerta sonora (audioplayers)
+    │   ├── notification_service.dart # Notificaciones persistentes (flutter_local_notifications)
+    │   └── config_service.dart    # Persistencia local + envío de configuración al ESP32
     └── screens/
-        └── home_screen.dart     # UI principal: nube conexión, temperatura, estado
+        └── home_screen.dart       # UI: temperatura, estado, mensaje, sliders, campos de texto
 ```
 
 ### Dependencias (`pubspec.yaml`)
 
 - `mqtt_client: ^10.3.0` — cliente MQTT con autenticación y reconexión automática
 - `audioplayers: ^6.1.0` — reproducción de audio en loop para la alerta
+- `flutter_local_notifications: ^18.0.0` — notificaciones persistentes en Android
+- `shared_preferences: ^2.3.0` — persistencia local de umbrales y mensajes
 
 ### Funcionamiento
 
-1. Al iniciar, se registran los listeners de los streams **antes** de conectar (evita race condition que dejaba `_conectado = false`).
+1. Al iniciar, carga la configuración guardada localmente (umbrales y textos personalizados).
 2. Se conecta al broker Mosquitto en `3.14.80.113:1883` con usuario/contraseña.
-3. Se suscribe a `esp32/alertas/temperatura` y `esp32/alertas/estado`.
-4. Cada mensaje recibido se almacena; cuando ambos tópicos tienen datos, se emite un `SensorData` combinado.
+3. Se suscribe a `esp32/alertas/temperatura`, `esp32/alertas/estado` y `esp32/alertas/mensaje`.
+4. Cada mensaje recibido se almacena; cuando temperatura y estado están disponibles, se emite un `SensorData` combinado.
 5. La UI muestra:
    - Ícono de nube verde/rojo indicando estado de conexión
    - Temperatura en °C con 2 decimales
-   - Etiqueta `NORMAL` (verde) o `ALERTA` (rojo)
-6. Si el estado es `ALERTA`, reproduce `alerta.mp3` en loop. Si vuelve a `NORMAL`, lo detiene.
+   - Etiqueta de estado (`NORMAL` verde, `ALERTA_MIN` o `ALERTA_MAX` rojo)
+   - Mensaje descriptivo recibido del ESP32
+   - **RangeSlider** (0-50°C) para ajustar umbral mínimo y máximo
+   - **3 campos de texto** para mensajes personalizados (temp baja, alta, normal)
+   - Botón **Guardar configuración** que persiste localmente y envía JSON al ESP32
+6. Si el estado es alerta: reproduce `alerta.mp3` en loop y muestra notificación persistente (no se descarta automáticamente al volver a normal).
+7. Si vuelve a `NORMAL`: detiene el sonido, pero la notificación queda visible hasta que el usuario la descarte.
 
 ### Bugs Encontrados y Corregidos
 
@@ -265,18 +286,22 @@ Forzar alerta desde la terminal de tu laptop:
 
 ```bash
 mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 \
-  -t "esp32/alertas/estado" -m "ALERTA"
+  -t "esp32/alertas/estado" -m "ALERTA_MAX"
 ```
 
-La app debe mostrar la etiqueta en rojo y reproducir el pitido en loop. Publicar `NORMAL` detiene el sonido.
+La app debe mostrar la etiqueta en rojo, reproducir el pitido en loop y mostrar una notificación persistente. Publicar `NORMAL` detiene el sonido pero no descarta la notificación.
 
 ---
 
-## Próximos Pasos
+## Cómo Probar el Sistema Completo
 
-- Detección de outliers en el ESP32 en lugar del umbral fijo de 30°C
-- Autenticación TLS entre ESP32/Flutter y Mosquitto (puerto 8883)
-- Soporte de notificaciones en segundo plano con `just_audio` + `audio_service`
+| Paso | Acción | Resultado esperado |
+|------|--------|--------------------|
+| 1 | ESP32 se enciende | Publica `NORMAL` en `estado`, LED apagado, Flutter muestra verde |
+| 2 | En Flutter: subir el mínimo sobre la temp actual (ej: 30°C) y guardar | ESP32 recibe config, pasa a `ALERTA_MIN`, LED enciende, Flutter rojo + mensaje + sonido + notificación persistente |
+| 3 | En Flutter: bajar el mínimo (ej: 5°C) y guardar | LED apagado, estado `NORMAL`, sonido se detiene, notificación sigue visible (descarte manual) |
+| 4 | Repetir con el máximo (bajarlo debajo de la temp actual) | `ALERTA_MAX`, LED enciende, mensaje de alta temperatura |
+| 5 | Editar mensajes en los campos de texto y guardar | ESP32 interpola `{temp}` al publicar en `mensaje` |
 
 ---
 
@@ -292,4 +317,5 @@ La app debe mostrar la etiqueta en rojo y reproducir el pitido en loop. Publicar
 | Mosquitto — Estado | `sudo systemctl status mosquitto` |
 | Suscribirse a tópicos | `mosquitto_sub -h <IP> -p 1883 -u <user> -P <pass> -t "<topic>" -v` |
 | Publicar un mensaje | `mosquitto_pub -h <IP> -p 1883 -u <user> -P <pass> -t "<topic>" -m "<msg>"` |
-| Forzar alerta de prueba | `mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/alertas/estado" -m "ALERTA"` |
+| Forzar alerta de prueba | `mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/alertas/estado" -m "ALERTA_MAX"` |
+| Enviar configuración manual | `mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/alertas/config" -m '{"min":20,"max":35,"msg_min":"Frio: {temp} C","msg_max":"Calor: {temp} C","msg_normal":"OK {temp} C"}'` |

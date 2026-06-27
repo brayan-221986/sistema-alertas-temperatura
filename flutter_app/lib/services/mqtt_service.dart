@@ -7,6 +7,7 @@ import '../models/sensor_data.dart';
 class MqttService {
   static const String _topicoTemperatura = 'esp32/alertas/temperatura';
   static const String _topicoEstado = 'esp32/alertas/estado';
+  static const String _topicoMensaje = 'esp32/alertas/mensaje';
 
   final String host;
   final int port;
@@ -17,6 +18,7 @@ class MqttService {
 
   double? _ultimaTemperatura;
   String? _ultimoEstado;
+  String? _ultimoMensaje;
 
   final _controladorDatos = StreamController<SensorData>.broadcast();
   final _controladorConexion = StreamController<bool>.broadcast();
@@ -82,6 +84,7 @@ class MqttService {
   void _suscribirTopicos() {
     _cliente!.subscribe(_topicoTemperatura, MqttQos.atLeastOnce);
     _cliente!.subscribe(_topicoEstado, MqttQos.atLeastOnce);
+    _cliente!.subscribe(_topicoMensaje, MqttQos.atLeastOnce);
     _cliente!.updates!.listen(_alRecibirMensaje);
   }
 
@@ -94,15 +97,25 @@ class MqttService {
       _ultimaTemperatura = double.tryParse(texto);
     } else if (mensaje.topic == _topicoEstado) {
       _ultimoEstado = texto;
+    } else if (mensaje.topic == _topicoMensaje) {
+      _ultimoMensaje = texto;
     }
 
     if (_ultimaTemperatura != null && _ultimoEstado != null) {
       _controladorDatos.add(SensorData(
         temperatura: _ultimaTemperatura!,
         estado: _ultimoEstado!,
+        mensaje: _ultimoMensaje ?? '',
         timestamp: DateTime.now(),
       ));
     }
+  }
+
+  void publicar(String topico, String valor) {
+    if (_cliente == null || _cliente!.connectionStatus?.state != MqttConnectionState.connected) return;
+    final builder = MqttClientPayloadBuilder()..addString(valor);
+    _cliente!.publishMessage(topico, MqttQos.atLeastOnce, builder.payload!);
+    debugPrint('[MQTT] Publicado en $topico: $valor');
   }
 
   void desconectar() => _cliente?.disconnect();
