@@ -15,10 +15,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final MqttService _mqtt = MqttService(
-    host: '3.14.80.113',
+    host: 'BROKER_IP',
     port: 1883,
     usuario: 'esp32_alertas',
-    clave: 'alertas123',
+    clave: 'tu_password_mqtt',
   );
 
   final AlertSoundService _sonido = AlertSoundService();

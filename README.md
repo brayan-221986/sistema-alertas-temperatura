@@ -44,7 +44,8 @@ LED rojo:
 
 ```
 sistema-alertas-temp/
-├── .env                         # Credenciales (NO se sube a git)
+├── .env                         # Credenciales reales (NO se sube a git)
+├── .env.example                 # Plantilla de credenciales para nuevos usuarios
 ├── .gitignore
 ├── platformio.ini               # Configuración del proyecto
 ├── scripts/
@@ -77,18 +78,18 @@ sistema-alertas-temp/
 
 ### Gestión de Credenciales (`.env`)
 
-Las credenciales sensibles (WiFi, MQTT) se guardan en `.env`:
+Las credenciales sensibles (WiFi, MQTT) se configuran en `.env` (excluido de git). Usá `.env.example` como plantilla:
 
 ```env
-WIFI_SSID=Redmi 15
-WIFI_PASSWORD=123456789
-MQTT_BROKER_HOST=3.14.80.113
+WIFI_SSID=TuRedWiFi
+WIFI_PASSWORD=TuClaveWiFi
+MQTT_BROKER_HOST=192.168.1.100
 MQTT_BROKER_PORT=1883
 MQTT_USER=esp32_alertas
-MQTT_PASSWORD=alertas123
+MQTT_PASSWORD=tu_password_mqtt
 ```
 
-Al compilar, `scripts/load_env.py` lee `.env` y genera `include/secrets.h` automáticamente. Ambos archivos están excluidos de git (`.gitignore`).
+Renombrá `.env.example` a `.env` y completá con tus credenciales reales. Al compilar, `scripts/load_env.py` lee `.env` y genera `include/secrets.h` automáticamente. Ambos archivos están excluidos de git (`.gitignore`).
 
 ### Funcionamiento (Módulo 4 - configurable)
 
@@ -109,10 +110,10 @@ Al compilar, `scripts/load_env.py` lee `.env` y genera `include/secrets.h` autom
 
 ### Infraestructura
 
-- **Servidor:** Instancia Ubuntu en AWS EC2 (IP: `3.14.80.113`)
+- **Servidor:** Instancia Ubuntu en AWS EC2 (IP: `<BROKER_IP>`)
 - **Broker:** Mosquitto v2.0.22
 - **Puerto:** 1883 (MQTT estándar, sin TLS por ahora)
-- **Autenticación:** usuario/contraseña (`esp32_alertas` / `alertas123`)
+- **Autenticación:** usuario/contraseña (`esp32_alertas` / `tu_password_mqtt`)
 
 ### Instalación en la EC2
 
@@ -195,10 +196,10 @@ Salida esperada en el monitor serie:
 ```
 === Modulo 2: WiFi + MQTT ===
 [SensorTemp] Sensores DS18B20 detectados: 1
-[WiFi] Conectando a Redmi 15
+[WiFi] Conectando a TuRedWiFi
 .
 [WiFi] Conectado. IP: 10.60.69.216
-[MQTT] Conectando a 3.14.80.113:1883
+[MQTT] Conectando a BROKER_IP:1883
 [MQTT] Conectado.
 Temperatura actual: 12.00 C
 [MQTT] Publicado en 'esp32/alertas/temperatura': 12.00 (OK)
@@ -208,7 +209,7 @@ Temperatura actual: 12.00 C
 Verificación desde laptop:
 
 ```bash
-mosquitto_sub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/alertas/#" -v
+mosquitto_sub -h BROKER_IP -p 1883 -u esp32_alertas -P tu_password_mqtt -t "esp32/alertas/#" -v
 ```
 
 ---
@@ -246,7 +247,7 @@ flutter_app/
 ### Funcionamiento
 
 1. Al iniciar, carga la configuración guardada localmente (umbrales y textos personalizados).
-2. Se conecta al broker Mosquitto en `3.14.80.113:1883` con usuario/contraseña.
+2. Se conecta al broker Mosquitto en `BROKER_IP:1883` con usuario/contraseña.
 3. Se suscribe a `esp32/alertas/temperatura`, `esp32/alertas/estado` y `esp32/alertas/mensaje`.
 4. Cada mensaje recibido se almacena; cuando temperatura y estado están disponibles, se emite un `SensorData` combinado.
 5. La UI muestra:
@@ -288,7 +289,7 @@ flutter run
 Forzar alerta desde la terminal de tu laptop:
 
 ```bash
-mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 \
+mosquitto_pub -h BROKER_IP -p 1883 -u esp32_alertas -P tu_password_mqtt \
   -t "esp32/alertas/estado" -m "ALERTA_MAX"
 ```
 
@@ -320,5 +321,5 @@ La app debe mostrar la etiqueta en rojo, reproducir el pitido en loop y mostrar 
 | Mosquitto — Estado | `sudo systemctl status mosquitto` |
 | Suscribirse a tópicos | `mosquitto_sub -h <IP> -p 1883 -u <user> -P <pass> -t "<topic>" -v` |
 | Publicar un mensaje | `mosquitto_pub -h <IP> -p 1883 -u <user> -P <pass> -t "<topic>" -m "<msg>"` |
-| Forzar alerta de prueba | `mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/alertas/estado" -m "ALERTA_MAX"` |
-| Enviar configuración manual | `mosquitto_pub -h 3.14.80.113 -p 1883 -u esp32_alertas -P alertas123 -t "esp32/alertas/config" -m '{"min":20,"max":35,"msg_min":"Frio: {temp} C","msg_max":"Calor: {temp} C","msg_normal":"OK {temp} C"}'` |
+| Forzar alerta de prueba | `mosquitto_pub -h BROKER_IP -p 1883 -u esp32_alertas -P tu_password_mqtt -t "esp32/alertas/estado" -m "ALERTA_MAX"` |
+| Enviar configuración manual | `mosquitto_pub -h BROKER_IP -p 1883 -u esp32_alertas -P tu_password_mqtt -t "esp32/alertas/config" -m '{"min":20,"max":35,"msg_min":"Frio: {temp} C","msg_max":"Calor: {temp} C","msg_normal":"OK {temp} C"}'` |
